@@ -24,6 +24,7 @@ import java.lang.management.ManagementFactory;
 
 import javax.management.InstanceNotFoundException;
 import javax.management.MBeanServer;
+import javax.management.MBeanServerFactory;
 import javax.management.ObjectName;
 
 import org.jacoco.agent.rt.internal.output.FileOutput;
@@ -161,10 +162,13 @@ public class AgentTest implements IExceptionLogger, IAgentOutput {
 
 		ObjectName objectName = new ObjectName("org.jacoco:type=Runtime");
 
-		try {
-			ManagementFactory.getPlatformMBeanServer().getMBeanInfo(objectName);
-			fail("InstanceNotFoundException expected");
-		} catch (InstanceNotFoundException e) {
+		for (final MBeanServer server : MBeanServerFactory
+				.findMBeanServer(null)) {
+			try {
+				server.getMBeanInfo(objectName);
+				fail("InstanceNotFoundException expected");
+			} catch (InstanceNotFoundException e) {
+			}
 		}
 	}
 
