@@ -189,10 +189,16 @@ public final class AgentOptions {
 	 */
 	public static final String JMX = "jmx";
 
+	/**
+	 * Specifies whether the agent should automatically switch sessions and dump
+	 * coverage data for each test case. Default is <code>false</code>.
+	 */
+	public static final String PERTEST = "pertest";
+
 	private static final Collection<String> VALID_OPTIONS = Arrays.asList(
 			DESTFILE, APPEND, INCLUDES, EXCLUDES, EXCLCLASSLOADER,
 			INCLBOOTSTRAPCLASSES, INCLNOLOCATIONCLASSES, SESSIONID, DUMPONEXIT,
-			OUTPUT, ADDRESS, PORT, CLASSDUMPDIR, JMX);
+			OUTPUT, ADDRESS, PORT, CLASSDUMPDIR, JMX, PERTEST);
 
 	private final Map<String, String> options;
 
@@ -555,6 +561,27 @@ public final class AgentOptions {
 	 */
 	public void setJmx(final boolean jmx) {
 		setOption(JMX, jmx);
+	}
+
+	/**
+	 * Returns whether the agent should automatically switch sessions and dump
+	 * coverage data for each test case.
+	 *
+	 * @return <code>true</code>, when per-test mode is enabled
+	 */
+	public boolean getPertest() {
+		return getOption(PERTEST, false);
+	}
+
+	/**
+	 * Sets whether the agent should automatically switch sessions and dump
+	 * coverage data for each test case.
+	 *
+	 * @param pertest
+	 *            <code>true</code> if per-test mode should be enabled
+	 */
+	public void setPertest(final boolean pertest) {
+		setOption(PERTEST, pertest);
 	}
 
 	private void setOption(final String key, final int value) {
