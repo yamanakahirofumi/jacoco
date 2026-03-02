@@ -21,6 +21,12 @@ import org.jacoco.core.instr.Instrumenter;
 import org.jacoco.core.runtime.AgentOptions;
 import org.jacoco.core.runtime.IRuntime;
 import org.jacoco.core.runtime.WildcardMatcher;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.Label;
+import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.Opcodes;
 
 /**
  * Class file transformer to instrument classes for code coverage analysis.
@@ -50,6 +56,8 @@ public class CoverageTransformer implements ClassFileTransformer {
 
 	private final boolean inclNoLocationClasses;
 
+	private final boolean pertest;
+
 	/**
 	 * New transformer with the given delegates.
 	 *
@@ -71,6 +79,7 @@ public class CoverageTransformer implements ClassFileTransformer {
 		classFileDumper = new ClassFileDumper(options.getClassDumpDir());
 		inclBootstrapClasses = options.getInclBootstrapClasses();
 		inclNoLocationClasses = options.getInclNoLocationClasses();
+		pertest = options.getPertest();
 	}
 
 	public byte[] transform(final ClassLoader loader, final String classname,
@@ -81,6 +90,16 @@ public class CoverageTransformer implements ClassFileTransformer {
 		// We do not support class retransformation:
 		if (classBeingRedefined != null) {
 			return null;
+		}
+
+		if (pertest) {
+			if ("org/junit/runner/notification/RunNotifier".equals(classname)) {
+				return instrumentJUnit4(classfileBuffer);
+			}
+			if ("org/junit/platform/launcher/core/TestExecutionListenerRegistry$CompositeTestExecutionListener"
+					.equals(classname)) {
+				return instrumentJUnit5(classfileBuffer);
+			}
 		}
 
 		if (!filter(loader, classname, protectionDomain)) {
@@ -151,6 +170,182 @@ public class CoverageTransformer implements ClassFileTransformer {
 			return false;
 		}
 		return codeSource.getLocation() != null;
+	}
+
+	private byte[] instrumentJUnit4(final byte[] buffer) {
+		final ClassReader reader = new ClassReader(buffer);
+		final ClassWriter writer = new ClassWriter(reader,
+				ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
+		final ClassVisitor visitor = new ClassVisitor(Opcodes.ASM9, writer) {
+			@Override
+			public MethodVisitor visitMethod(final int access,
+					final String name, final String descriptor,
+					final String signature, final String[] exceptions) {
+				final MethodVisitor mv = super.visitMethod(access, name,
+						descriptor, signature, exceptions);
+				if ("fireTestStarted".equals(name)
+						&& "(Lorg/junit/runner/Description;)V"
+								.equals(descriptor)) {
+					return new MethodVisitor(Opcodes.ASM9, mv) {
+						@Override
+						public void visitCode() {
+							super.visitCode();
+							final Label start = new Label();
+							final Label end = new Label();
+							final Label handler = new Label();
+							visitTryCatchBlock(start, end, handler,
+									"java/lang/Throwable");
+							visitLabel(start);
+							visitMethodInsn(Opcodes.INVOKESTATIC,
+									"org/jacoco/agent/rt/RT", "getAgent",
+									"()Lorg/jacoco/agent/rt/IAgent;", false);
+							visitVarInsn(Opcodes.ALOAD, 1);
+							visitMethodInsn(Opcodes.INVOKEVIRTUAL,
+									"org/junit/runner/Description",
+									"getDisplayName", "()Ljava/lang/String;",
+									false);
+							visitMethodInsn(Opcodes.INVOKEINTERFACE,
+									"org/jacoco/agent/rt/IAgent",
+									"setSessionId", "(Ljava/lang/String;)V",
+									true);
+							visitLabel(end);
+							final Label exit = new Label();
+							visitJumpInsn(Opcodes.GOTO, exit);
+							visitLabel(handler);
+							visitInsn(Opcodes.POP);
+							visitLabel(exit);
+						}
+					};
+				}
+				if ("fireTestFinished".equals(name)
+						&& "(Lorg/junit/runner/Description;)V"
+								.equals(descriptor)) {
+					return new MethodVisitor(Opcodes.ASM9, mv) {
+						@Override
+						public void visitCode() {
+							super.visitCode();
+							final Label start = new Label();
+							final Label end = new Label();
+							final Label handler = new Label();
+							visitTryCatchBlock(start, end, handler,
+									"java/lang/Throwable");
+							visitLabel(start);
+							visitMethodInsn(Opcodes.INVOKESTATIC,
+									"org/jacoco/agent/rt/RT", "getAgent",
+									"()Lorg/jacoco/agent/rt/IAgent;", false);
+							visitInsn(Opcodes.ICONST_1);
+							visitMethodInsn(Opcodes.INVOKEINTERFACE,
+									"org/jacoco/agent/rt/IAgent", "dump",
+									"(Z)V", true);
+							visitLabel(end);
+							final Label exit = new Label();
+							visitJumpInsn(Opcodes.GOTO, exit);
+							visitLabel(handler);
+							visitInsn(Opcodes.POP);
+							visitLabel(exit);
+						}
+					};
+				}
+				return mv;
+			}
+		};
+		reader.accept(visitor, 0);
+		return writer.toByteArray();
+	}
+
+	private byte[] instrumentJUnit5(final byte[] buffer) {
+		final ClassReader reader = new ClassReader(buffer);
+		final ClassWriter writer = new ClassWriter(reader,
+				ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
+		final ClassVisitor visitor = new ClassVisitor(Opcodes.ASM9, writer) {
+			@Override
+			public MethodVisitor visitMethod(final int access,
+					final String name, final String descriptor,
+					final String signature, final String[] exceptions) {
+				final MethodVisitor mv = super.visitMethod(access, name,
+						descriptor, signature, exceptions);
+				if ("executionStarted".equals(name)
+						&& "(Lorg/junit/platform/launcher/TestIdentifier;)V"
+								.equals(descriptor)) {
+					return new MethodVisitor(Opcodes.ASM9, mv) {
+						@Override
+						public void visitCode() {
+							super.visitCode();
+							final Label start = new Label();
+							final Label end = new Label();
+							final Label handler = new Label();
+							visitTryCatchBlock(start, end, handler,
+									"java/lang/Throwable");
+							visitLabel(start);
+							visitVarInsn(Opcodes.ALOAD, 1);
+							visitMethodInsn(Opcodes.INVOKEVIRTUAL,
+									"org/junit/platform/launcher/TestIdentifier",
+									"isTest", "()Z", false);
+							final Label notTest = new Label();
+							visitJumpInsn(Opcodes.IFEQ, notTest);
+							visitMethodInsn(Opcodes.INVOKESTATIC,
+									"org/jacoco/agent/rt/RT", "getAgent",
+									"()Lorg/jacoco/agent/rt/IAgent;", false);
+							visitVarInsn(Opcodes.ALOAD, 1);
+							visitMethodInsn(Opcodes.INVOKEVIRTUAL,
+									"org/junit/platform/launcher/TestIdentifier",
+									"getDisplayName", "()Ljava/lang/String;",
+									false);
+							visitMethodInsn(Opcodes.INVOKEINTERFACE,
+									"org/jacoco/agent/rt/IAgent",
+									"setSessionId", "(Ljava/lang/String;)V",
+									true);
+							visitLabel(notTest);
+							visitLabel(end);
+							final Label exit = new Label();
+							visitJumpInsn(Opcodes.GOTO, exit);
+							visitLabel(handler);
+							visitInsn(Opcodes.POP);
+							visitLabel(exit);
+						}
+					};
+				}
+				if ("executionFinished".equals(name)
+						&& "(Lorg/junit/platform/launcher/TestIdentifier;Lorg/junit/platform/engine/TestExecutionResult;)V"
+								.equals(descriptor)) {
+					return new MethodVisitor(Opcodes.ASM9, mv) {
+						@Override
+						public void visitCode() {
+							super.visitCode();
+							final Label start = new Label();
+							final Label end = new Label();
+							final Label handler = new Label();
+							visitTryCatchBlock(start, end, handler,
+									"java/lang/Throwable");
+							visitLabel(start);
+							visitVarInsn(Opcodes.ALOAD, 1);
+							visitMethodInsn(Opcodes.INVOKEVIRTUAL,
+									"org/junit/platform/launcher/TestIdentifier",
+									"isTest", "()Z", false);
+							final Label notTest = new Label();
+							visitJumpInsn(Opcodes.IFEQ, notTest);
+							visitMethodInsn(Opcodes.INVOKESTATIC,
+									"org/jacoco/agent/rt/RT", "getAgent",
+									"()Lorg/jacoco/agent/rt/IAgent;", false);
+							visitInsn(Opcodes.ICONST_1);
+							visitMethodInsn(Opcodes.INVOKEINTERFACE,
+									"org/jacoco/agent/rt/IAgent", "dump",
+									"(Z)V", true);
+							visitLabel(notTest);
+							visitLabel(end);
+							final Label exit = new Label();
+							visitJumpInsn(Opcodes.GOTO, exit);
+							visitLabel(handler);
+							visitInsn(Opcodes.POP);
+							visitLabel(exit);
+						}
+					};
+				}
+				return mv;
+			}
+		};
+		reader.accept(visitor, 0);
+		return writer.toByteArray();
 	}
 
 	private static String toVMName(final String srcName) {
